@@ -1,0 +1,13 @@
+logLevel: info
+api: yes
+apiAddress: :8889
+
+rtspAddress: :8554
+rtmpAddress: :1935
+hlsAddress: :8888
+
+paths:
+  live:
+    source: publisher
+    runOnReady: ""
+    runOnReadyRestart: no

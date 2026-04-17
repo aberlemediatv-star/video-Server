@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+data/vod/*
+!data/vod/.gitkeep
+data/work/
+data/incoming/*
+!data/incoming/.gitkeep
+.DS_Store
