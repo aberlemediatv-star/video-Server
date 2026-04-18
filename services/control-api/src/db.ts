@@ -176,7 +176,7 @@ export async function claimNextJob(): Promise<JobRow | null> {
     const sel = await client.query<{ id: string }>(
       `SELECT id FROM jobs
        WHERE status = 'queued'
-         AND type IN ('vod_phase_a', 'vod_angle', 'vod_multi_audio', 'vod_immersive_audio')
+         AND type IN ('vod_phase_a', 'vod_angle', 'vod_multi_audio', 'vod_immersive_audio', 'vod_spatial_package')
        ORDER BY created_at ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,

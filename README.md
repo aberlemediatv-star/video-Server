@@ -1,90 +1,91 @@
 # Video-Server
 
-VOD/Live-Streaming-Stack mit **HLS + MPEG-DASH (CMAF)**, Multi-Audio, Multi-Angle, 180°/360°-Playback und Platzhalter-Feldern für Apple Vision Pro (Spatial). **Open-Source-Pipeline**: FFmpeg, Shaka Packager, Nginx, MediaMTX, MinIO, Postgres, Redis. **Ohne DRM** (bewusste Entscheidung).
+VOD/Live-Streaming-Stack mit **HLS + MPEG-DASH (CMAF)**, Multi-Audio (bis **22.2 Opus**), Multi-Angle, 180°/360°-Playback, **Stereo 3D (SBS/TB)** und Spatial-Packaging-Pfad für Apple Vision Pro. **Open-Source-Pipeline**: FFmpeg, Shaka Packager, Nginx, MediaMTX, MinIO, Postgres, Redis. Optional **Observability** (Prometheus/Grafana) und **OIDC-Auth**. **Ohne DRM** (bewusste Entscheidung).
 
-Repo: **https://github.com/aberlemediatv-star/video-Server**
+Repo: https://github.com/aberlemediatv-star/video-Server
 
-## Bestandteile
+## Struktur
 
-- `services/control-api` — Fastify-API + Worker (FFmpeg + Shaka via Docker-Socket)
-- `apps/admin-web` — React-Admin (MUI): Assets, Presign, Jobs, Projektion/Stereo/Spatial
-- `apps/player-web` — React-Player (Shaka + Three.js): HLS/DASH, Multi-Audio, Multi-Angle, 360°/180°, Stereo SBS/TB, Untertitel
-- `scripts/` — FFmpeg-Ladder (SD/HD), Shaka-Packaging (CMAF), **HDR (HEVC Main10)**, **AV1 (SVT-AV1)**, **Multi-Audio**, **WebVTT-Untertitel**
-- `nginx/` — VOD-Origin, Live-HLS-Proxy, Cache-Feinschliff
-- `mediamtx/` — Live-Ingest (SRT/RTMP/RTSP/WebRTC)
-- `.github/workflows/ci.yml` — Build-Check für API + beide Web-Apps
+- `services/control-api` — Fastify-API (**/metrics**, **OIDC-optional**, **SSAI-Demo**) + Worker
+- `apps/admin-web` — React-Admin (MUI)
+- `apps/player-web` — React-Player (Shaka + Three.js)
+- `apps/player-tv` — **Tizen / webOS**-Verpackung für `player-web` (Build separat nötig)
+- `scripts/` — FFmpeg/Shaka/MV-HEVC/Untertitel/AV1/Immersive-Audio
+- `observability/` — Prometheus-Config; Grafana kommt aus Compose
+- `nginx/`, `mediamtx/`, `data/`, `.github/workflows/ci.yml`
 
 ## Schnellstart
 
 ```bash
-cp .env.example .env   # optional: ADMIN_API_KEY setzen!
+cp .env.example .env   # ADMIN_API_KEY setzen, optional OIDC_*
 docker compose up -d --build
 ```
 
-URLs:
-
-- VOD-Origin: `http://localhost:8080/vod/<slug>/`
+- VOD: `http://localhost:8080/vod/<slug>/`
 - Live-HLS-Proxy: `http://localhost:8080/live/hls/index.m3u8`
-- API: `http://localhost:3000` oder über Nginx: `http://localhost:8080/api/`
-- Admin: `apps/admin-web` lokal (`npm run dev`) auf `http://localhost:5174`
-- Player: `apps/player-web` lokal (`npm run dev`) auf `http://localhost:5173`
-- MinIO-Konsole: `http://localhost:9001` (Default `minio`/`minio12345`)
+- API: `http://localhost:3000` oder `http://localhost:8080/api/`
+- MinIO: `http://localhost:9001` (Buckets `incoming`/`assets` werden automatisch angelegt)
 
-MinIO-Buckets **`incoming`** und **`assets`** werden beim Start **automatisch** angelegt (`minio-init`-Service).
+**Observability** optional (Profile):
 
-## Admin-Auth
+```bash
+docker compose --profile observability up -d prometheus grafana
+# Prometheus http://localhost:9090   Grafana http://localhost:3001 (admin/admin)
+```
 
-`ADMIN_API_KEY` setzen (Umgebungsvariable oder `.env`). Alle **POST**-Routen verlangen dann Header **`X-Admin-Key`**. Ohne Key sind POSTs **offen** — nur für lokale Entwicklung.
+## Auth-Matrix
 
-## VOD-Workflow
+Reihenfolge: **OIDC** > **`ADMIN_API_KEY`** > offen (nur Dev).
 
-1. Eingangsdatei nach `data/incoming/meinfilm.mp4` legen (oder per Presign hochladen).
-2. Im Admin „Worker-Job“ mit Typ **`vod_phase_a`**:
-   ```json
-   { "inputRelativePath": "incoming/meinfilm.mp4", "outputSlug": "meinfilm", "title": "Mein Film" }
-   ```
-3. Worker führt aus: **FFmpeg ABR-Ladder** → **Shaka Packager (HLS + DASH)** → kopiert nach `data/vod/<slug>/` → aktualisiert Asset.
-4. Im Player Asset wählen und **Laden**.
+- **OIDC (Produktion):** `OIDC_ISSUER_URL`, optional `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`. Clients senden `Authorization: Bearer <JWT>`; die API verifiziert via `.well-known/openid-configuration` + JWKS.
+- **API-Key (lokal):** `ADMIN_API_KEY` setzen, Admin-UI speichert den Key, Header `X-Admin-Key` wird gesendet.
+- Ohne beides sind POSTs **offen** — nur Entwicklung.
 
-## Weitere Skripte
+## Jobs
 
-- **Multi-Audio (2 Sprachen):** Job-Typ `vod_multi_audio` (Quelle braucht zwei Audio-Streams).
-- **Immersive Audio bis 22.2:** Job-Typ `vod_immersive_audio` — erzeugt je nach Quelle:
-  - **AAC-LC Stereo** (immer)
-  - **AAC-LC 5.1** (bei ≥6 Kanälen)
-  - **AAC-LC 7.1** (bei ≥8 Kanälen)
-  - **Opus 22.2 (24 ch)** (bei ≥24 Kanälen, NHK Super Hi-Vision)
-  - **Opus Multichannel-Fallback** sonst
-  Player-/Geräte-Hinweis: AAC-LC wird breit ≤7.1 unterstützt; **22.2** läuft in Chrome/Firefox über **Opus-in-MP4** (DASH) — Safari/iOS/tvOS unterstützen das i. d. R. **nicht**; dort Fallback auf 7.1/5.1/Stereo.
-- **Multi-Angle (Stufe 1):** je Winkel eigener `vod_angle`-Job; im Asset `angles`-JSON setzen.
-- **HDR:** `./scripts/transcode_hdr_hevc_1080p.sh` (HEVC Main10, HDR10/PQ).
-- **AV1:** `./scripts/transcode_av1_1080p.sh` (SVT-AV1).
-- **Untertitel:** `./scripts/package_cmaf_with_subs.sh` (Sidecar-WebVTT).
+| Typ | Zweck |
+|-----|------|
+| `vod_phase_a` | ABR-Ladder (1080/720/480 AVC + AAC) → HLS/DASH |
+| `vod_angle` | weiterer Winkel als eigener Slug (Stufe-1-Multi-Angle) |
+| `vod_multi_audio` | zwei Audio-Sprachen |
+| `vod_immersive_audio` | Stereo/5.1/7.1 (AAC) + 22.2 (Opus), je nach Quelle |
+| `vod_spatial_package` | packaging-only für bereits MV-HEVC-encodierte Datei |
 
-## 360°, 180°, 3D (SBS/TB)
+Payload (bis auf `vod_spatial_package` identisch):
 
-Asset-Felder in DB/Admin:
+```json
+{ "inputRelativePath": "incoming/meinfilm.mp4", "outputSlug": "meinfilm", "title": "Mein Film" }
+```
 
-- `projection`: `none` | `equirect180` | `equirect360` | `apmp_180` | `apmp_360`
-- `stereo`: `mono` | `sbs` | `tb`
-- `spatial`: `boolean` (Platzhalter für Apple MV-HEVC)
+## Spatial / Apple Vision Pro
 
-Player zeigt den passenden Modus:
+- **Encoding**: FFmpeg-Mainline kann **kein** MV-HEVC. Host-Helper `scripts/transcode_mv_hevc_macos.sh` prüft nur die Voraussetzungen und verweist auf Apples **AVFoundation** (Xcode 15+, „Authoring Spatial Video“). Fertige MV-HEVC-Datei anschließend nach `data/incoming/` legen.
+- **Packaging**: `vod_spatial_package` → `scripts/package_cmaf_spatial.sh`. Shaka Packager kennt MV-HEVC aktuell nicht vollständig; für produktive Apple-HLS-Auslieferung kann ein **Apple HLS Tools** oder kommerzieller Packager nötig sein.
+- DB-Felder `projection` (`apmp_180`/`apmp_360`) und `spatial: boolean` sind für Asset-Katalog/Player vorgesehen.
 
-- **360/180** → Three.js-Rendering auf Halb-/Vollkugel
-- **SBS/TB** → CSS-Crop auf eine Augenhälfte (Fallback-Rendering)
-- **spatial** → Hinweis, dass natives Playback Apple Vision Pro vorbehalten ist
+## SSAI (Demo)
 
-## Nicht enthalten / bewusst weggelassen
+`GET /api/ssai/:slug/master.m3u8` liest das gebaute HLS-Master und prependet Pre-Roll-Hinweise. **Kein** echter Ad-Decision-Flow — produktiv braucht man **SCTE-35**, VAST/VMAP, per-Variant Rewrite. Siehe Plan „Phase H+“.
 
-- **DRM** (Widevine/FairPlay/ClearKey/PlayReady).
-- **Apple Vision Pro / MV-HEVC / APMP** — Felder sind vorbereitet, Encoding nicht. Benötigt Apple-Tooling oder experimentelle x265-Patches.
-- **Produktive Auth** (OAuth/OIDC), **SSAI**, **Smart-TV-Apps**, **Analytics/Observability** — siehe Plan Phase H+.
+## Observability
+
+- `GET /metrics` liefert Prometheus-Metriken: Default-Node-Metriken, `http_requests_total`, `http_request_duration_seconds`, `jobs_enqueued_total`, `jobs_finished_total`, `job_duration_seconds`.
+- Worker-Logs sind strukturiert (JSON, `service="worker"`, `jobId`).
+- Prometheus + Grafana starten optional per Profile `observability`.
+
+## Smart-TV
+
+- **Tizen (Samsung)** und **webOS (LG)**: `apps/player-tv/` enthält `config.xml` / `appinfo.json`. Build von `apps/player-web/dist` hineinkopieren und mit dem jeweiligen SDK packen. Siehe `apps/player-tv/README.md`.
+- **tvOS** (Apple): keine Web-App-Plattform — eigenes Xcode-Projekt nötig, nicht enthalten.
+- **Android TV**: das bestehende `player-web` funktioniert im TV-Browser/WebView.
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) prüft `services/control-api`, `apps/admin-web`, `apps/player-web` via `npm ci && npm run build` und läuft `shellcheck` über `scripts/*.sh`.
+`.github/workflows/ci.yml` — `npm ci && npm run build` für API + beide Web-Apps; `shellcheck` für Skripte.
 
-## Lizenz
+## Bewusst nicht enthalten
 
-MIT — siehe `LICENSE`.
+- **DRM** (Widevine/FairPlay/ClearKey/PlayReady).
+- **MV-HEVC-Encoding im Repo** (benötigt Apple-Tooling).
+- **Vollständige SSAI** (nur Demo-Endpoint).
+- **tvOS-App** (braucht nativen Xcode-Stack).

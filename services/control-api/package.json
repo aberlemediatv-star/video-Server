@@ -14,7 +14,9 @@
     "@aws-sdk/s3-request-presigner": "^3.787.0",
     "@fastify/cors": "^10.0.1",
     "fastify": "^5.1.0",
-    "pg": "^8.14.1"
+    "jose": "^6.2.2",
+    "pg": "^8.14.1",
+    "prom-client": "^15.1.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

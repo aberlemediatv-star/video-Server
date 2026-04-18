@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import { readFile } from "node:fs/promises";
 import { adminConfigured, requireAdmin } from "./auth.js";
 import {
   insertJob,
@@ -9,6 +10,13 @@ import {
   migrate,
   upsertAsset,
 } from "./db.js";
+import {
+  httpDuration,
+  httpRequests,
+  jobsEnqueued,
+  registry,
+} from "./metrics.js";
+import { oidcPublicConfig } from "./oidc.js";
 import { presignPut } from "./presign.js";
 
 const vodBase = process.env.VOD_PUBLIC_BASE?.replace(/\/$/, "") ?? "http://localhost:8080/vod";
@@ -53,6 +61,25 @@ await app.register(cors, {
   ],
 });
 
+app.addHook("onRequest", async (req) => {
+  (req as { _tsNs?: bigint })._tsNs = process.hrtime.bigint();
+});
+
+app.addHook("onResponse", async (req, reply) => {
+  const route =
+    (req.routeOptions && req.routeOptions.url) ||
+    req.url.split("?")[0] ||
+    "other";
+  const status = String(reply.statusCode);
+  const labels = { method: req.method, route, status };
+  httpRequests.inc(labels, 1);
+  const start = (req as { _tsNs?: bigint })._tsNs;
+  if (start) {
+    const dt = Number(process.hrtime.bigint() - start) / 1e9;
+    httpDuration.observe(labels, dt);
+  }
+});
+
 app.addHook("preHandler", async (req, reply) => {
   if (
     req.method === "GET" ||
@@ -61,14 +88,20 @@ app.addHook("preHandler", async (req, reply) => {
   )
     return;
   if (req.url === "/health") return;
-  requireAdmin(req, reply);
+  await requireAdmin(req, reply);
   if (reply.sent) return;
 });
 
 app.get("/health", async () => ({
   ok: true as const,
   adminAuth: adminConfigured(),
+  oidc: oidcPublicConfig(),
 }));
+
+app.get("/metrics", async (_req, reply) => {
+  reply.header("Content-Type", registry.contentType);
+  return registry.metrics();
+});
 
 app.get("/api/assets", async () => {
   const rows = await listAssets();
@@ -129,6 +162,7 @@ app.post("/api/jobs", async (req, reply) => {
     "vod_angle",
     "vod_multi_audio",
     "vod_immersive_audio",
+    "vod_spatial_package",
   ]);
   if (!allowed.has(body.type)) {
     reply.code(400);
@@ -139,6 +173,7 @@ app.post("/api/jobs", async (req, reply) => {
     payload: body.payload ?? {},
     assetSlug: body.assetSlug,
   });
+  jobsEnqueued.inc({ type: body.type }, 1);
   reply.code(201);
   return { job: rowToJob(row) };
 });
@@ -152,6 +187,44 @@ app.post("/api/jobs/demo", async (_req, reply) => {
   });
   reply.code(201);
   return { job: rowToJob(row) };
+});
+
+/**
+ * SSAI-Demo: liest den gebauten HLS-Master eines Assets aus dem VOD-Volume
+ * und fügt eine Pre-Roll-Variante (via Diskontinuität) voran.
+ *
+ * HINWEIS: Dies ist ein *Demo-Stub*. Produktives SSAI benötigt SCTE-35-Marker,
+ * einen Ad-Decision-Server (VAST/VMAP) und Manifest-Manipulation pro Varianten-Playlist.
+ * Der Stub manipuliert nur das Master-Manifest und fügt Hinweiskommentare hinzu.
+ *
+ * Konfig: SSAI_VOD_ROOT (Default /usr/share/nginx/html/vod im Nginx-Container,
+ * lokal meist ./data/vod).
+ */
+app.get("/api/ssai/:slug/master.m3u8", async (req, reply) => {
+  const slug = (req.params as { slug: string }).slug.replace(
+    /[^a-zA-Z0-9-_]/g,
+    "",
+  );
+  const vodRoot = process.env.SSAI_VOD_ROOT ?? "/data/vod";
+  const path = `${vodRoot}/${slug}/master.m3u8`;
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    reply.code(404);
+    return { error: "master.m3u8 not found for slug", slug };
+  }
+  const preroll = process.env.SSAI_PREROLL_NOTE ?? "AD-BREAK placeholder";
+  const injected = [
+    "#EXTM3U",
+    "## SSAI-DEMO — not production SSAI",
+    `## pre-roll: ${preroll}`,
+    "## Real SSAI requires SCTE-35 + ad decision server + per-variant rewrite.",
+    text.replace(/^#EXTM3U\r?\n/, ""),
+  ].join("\n");
+  reply.header("Content-Type", "application/vnd.apple.mpegurl");
+  reply.header("Cache-Control", "public, max-age=5");
+  return injected;
 });
 
 app.post("/api/uploads/presign", async (req, reply) => {

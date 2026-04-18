@@ -9,6 +9,25 @@ import {
   updateJob,
 } from "./db.js";
 
+function log(
+  level: "info" | "warn" | "error",
+  jobId: string | null,
+  msg: string,
+  extra?: Record<string, unknown>,
+) {
+  const rec = {
+    ts: new Date().toISOString(),
+    level,
+    service: "worker",
+    jobId,
+    msg,
+    ...(extra ?? {}),
+  };
+  const line = JSON.stringify(rec);
+  if (level === "error") console.error(line);
+  else console.log(line);
+}
+
 const DATA_ROOT = process.env.DATA_ROOT ?? join(process.cwd(), "..", "..", "data");
 const SCRIPT_ROOT = process.env.SCRIPT_ROOT ?? join(process.cwd(), "..", "..", "scripts");
 const vodPublicBase = process.env.VOD_PUBLIC_BASE?.replace(/\/$/, "") ?? "http://localhost:8080/vod";
@@ -120,6 +139,45 @@ async function runVodMultiAudio(
   });
 }
 
+/**
+ * Packt eine *bereits* MV-HEVC-encodierte .mov/.mp4 (auf dem Host erstellt,
+ * z.B. via scripts/transcode_mv_hevc_macos.sh) nach HLS+DASH.
+ * Der Worker-Container kann MV-HEVC nicht encodieren — nur paketieren.
+ */
+async function runVodSpatialPackage(
+  jobId: string,
+  inputRelative: string,
+  outputSlug: string,
+  title: string,
+): Promise<void> {
+  const inputAbs = resolveInputFile(DATA_ROOT, inputRelative);
+  const workBase = join(DATA_ROOT, "work", String(jobId));
+  const rend = join(workBase, "rend");
+  const pkg = join(workBase, "pkg");
+  const vodOut = join(DATA_ROOT, "vod", outputSlug);
+  rmSync(workBase, { recursive: true, force: true });
+  mkdirSync(rend, { recursive: true });
+  mkdirSync(pkg, { recursive: true });
+  mkdirSync(vodOut, { recursive: true });
+
+  await run("cp", [inputAbs, join(rend, "spatial.mp4")]);
+  await run("bash", [
+    join(SCRIPT_ROOT, "package_cmaf_spatial.sh"),
+    rend,
+    pkg,
+  ]);
+  await rsyncDir(pkg, vodOut);
+
+  const hls = `${vodPublicBase}/${encodeURIComponent(outputSlug)}/master.m3u8`;
+  const dash = `${vodPublicBase}/${encodeURIComponent(outputSlug)}/manifest.mpd`;
+  await setAssetManifests({
+    slug: outputSlug,
+    title,
+    manifestHls: hls,
+    manifestDash: dash,
+  });
+}
+
 async function runVodImmersiveAudio(
   jobId: string,
   inputRelative: string,
@@ -195,17 +253,35 @@ async function processJob(job: JobRow) {
         throw new Error("payload.inputRelativePath and outputSlug required");
       }
       await runVodImmersiveAudio(id, inputRelativePath, outputSlug, title);
+    } else if (job.type === "vod_spatial_package") {
+      const inputRelativePath = String(payload.inputRelativePath ?? "");
+      const outputSlug = String(payload.outputSlug ?? "").replace(
+        /[^a-zA-Z0-9-_]/g,
+        "",
+      );
+      const title = String(payload.title ?? outputSlug);
+      if (!inputRelativePath || !outputSlug) {
+        throw new Error("payload.inputRelativePath and outputSlug required");
+      }
+      await runVodSpatialPackage(id, inputRelativePath, outputSlug, title);
     } else {
       throw new Error(`unsupported job type: ${job.type}`);
     }
     await updateJob(id, { status: "succeeded", message: null });
+    log("info", id, "job succeeded", { type: job.type });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await updateJob(id, { status: "failed", message: msg });
+    log("error", id, "job failed", { type: job.type, err: msg });
   }
 }
 
 await migrate();
+log("info", null, "worker started", {
+  dataRoot: DATA_ROOT,
+  scriptRoot: SCRIPT_ROOT,
+  jobTimeoutSec,
+});
 
 async function loop() {
   for (;;) {
@@ -215,9 +291,11 @@ async function loop() {
         await new Promise((r) => setTimeout(r, 1500));
         continue;
       }
+      log("info", job.id, "job started", { type: job.type });
       await processJob(job);
     } catch (e) {
-      console.error("worker loop error", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      log("error", null, "worker loop error", { err: msg });
       await new Promise((r) => setTimeout(r, 3000));
     }
   }

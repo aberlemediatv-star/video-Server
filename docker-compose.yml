@@ -32,8 +32,14 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      SSAI_VOD_ROOT: /data/vod
       ADMIN_DEV_ORIGIN: ${ADMIN_DEV_ORIGIN:-http://localhost:5174}
       PLAYER_DEV_ORIGIN: ${PLAYER_DEV_ORIGIN:-http://localhost:5173}
+    volumes:
+      - ./data:/data:ro
     ports:
       - "3000:3000"
     depends_on:
@@ -145,6 +151,35 @@ services:
       retries: 10
     restart: unless-stopped
 
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    depends_on:
+      - control-api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: ["observability"]
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   minio_data:
   pg_data:
+  prom_data:
+  grafana_data:

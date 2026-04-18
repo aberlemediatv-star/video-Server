@@ -1,0 +1,15 @@
+{
+  "id": "com.example.videoserver.player",
+  "version": "1.0.0",
+  "vendor": "video-server",
+  "type": "web",
+  "main": "index.html",
+  "title": "Video-Server Player",
+  "icon": "icon.png",
+  "largeIcon": "icon-large.png",
+  "uiRevision": 2,
+  "resolution": "1920x1080",
+  "transparent": false,
+  "disableBackHistoryAPI": false,
+  "requiredPermissions": ["network.internet"]
+}
