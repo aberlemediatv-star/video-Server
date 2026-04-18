@@ -124,7 +124,12 @@ app.post("/api/jobs", async (req, reply) => {
     reply.code(400);
     return { error: "type required" };
   }
-  const allowed = new Set(["vod_phase_a", "vod_angle", "vod_multi_audio"]);
+  const allowed = new Set([
+    "vod_phase_a",
+    "vod_angle",
+    "vod_multi_audio",
+    "vod_immersive_audio",
+  ]);
   if (!allowed.has(body.type)) {
     reply.code(400);
     return { error: "unsupported job type" };

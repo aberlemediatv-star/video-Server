@@ -120,6 +120,44 @@ async function runVodMultiAudio(
   });
 }
 
+async function runVodImmersiveAudio(
+  jobId: string,
+  inputRelative: string,
+  outputSlug: string,
+  title: string,
+): Promise<void> {
+  const inputAbs = resolveInputFile(DATA_ROOT, inputRelative);
+  const workBase = join(DATA_ROOT, "work", String(jobId));
+  const rend = join(workBase, "rend");
+  const pkg = join(workBase, "pkg");
+  const vodOut = join(DATA_ROOT, "vod", outputSlug);
+  rmSync(workBase, { recursive: true, force: true });
+  mkdirSync(rend, { recursive: true });
+  mkdirSync(pkg, { recursive: true });
+  mkdirSync(vodOut, { recursive: true });
+
+  await run("bash", [
+    join(SCRIPT_ROOT, "transcode_immersive_audio.sh"),
+    inputAbs,
+    rend,
+  ]);
+  await run("bash", [
+    join(SCRIPT_ROOT, "package_cmaf_immersive.sh"),
+    rend,
+    pkg,
+  ]);
+  await rsyncDir(pkg, vodOut);
+
+  const hls = `${vodPublicBase}/${encodeURIComponent(outputSlug)}/master.m3u8`;
+  const dash = `${vodPublicBase}/${encodeURIComponent(outputSlug)}/manifest.mpd`;
+  await setAssetManifests({
+    slug: outputSlug,
+    title,
+    manifestHls: hls,
+    manifestDash: dash,
+  });
+}
+
 async function processJob(job: JobRow) {
   const id = job.id;
   const payload = job.payload as Record<string, unknown>;
@@ -146,6 +184,17 @@ async function processJob(job: JobRow) {
         throw new Error("payload.inputRelativePath and outputSlug required");
       }
       await runVodMultiAudio(id, inputRelativePath, outputSlug, title);
+    } else if (job.type === "vod_immersive_audio") {
+      const inputRelativePath = String(payload.inputRelativePath ?? "");
+      const outputSlug = String(payload.outputSlug ?? "").replace(
+        /[^a-zA-Z0-9-_]/g,
+        "",
+      );
+      const title = String(payload.title ?? outputSlug);
+      if (!inputRelativePath || !outputSlug) {
+        throw new Error("payload.inputRelativePath and outputSlug required");
+      }
+      await runVodImmersiveAudio(id, inputRelativePath, outputSlug, title);
     } else {
       throw new Error(`unsupported job type: ${job.type}`);
     }

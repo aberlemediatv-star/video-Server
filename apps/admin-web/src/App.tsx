@@ -410,7 +410,8 @@ export default function App() {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Datei muss unter <code>data/incoming/…</code> liegen (Host-Volume). Typen:{" "}
-            <code>vod_phase_a</code>, <code>vod_angle</code>, <code>vod_multi_audio</code>.
+            <code>vod_phase_a</code>, <code>vod_angle</code>, <code>vod_multi_audio</code>,{" "}
+            <code>vod_immersive_audio</code> (Stereo/5.1/7.1/22.2 Opus).
           </Typography>
           <Box sx={{ mb: 1 }}>
             <Typography variant="caption">Job-Typ</Typography>
@@ -422,6 +423,9 @@ export default function App() {
               <option value="vod_phase_a">vod_phase_a</option>
               <option value="vod_angle">vod_angle</option>
               <option value="vod_multi_audio">vod_multi_audio</option>
+              <option value="vod_immersive_audio">
+                vod_immersive_audio (22.2 Opus)
+              </option>
             </select>
           </Box>
           <TextField

@@ -48,7 +48,14 @@ MinIO-Buckets **`incoming`** und **`assets`** werden beim Start **automatisch** 
 
 ## Weitere Skripte
 
-- **Multi-Audio:** Job-Typ `vod_multi_audio` (Quelle braucht zwei Audio-Streams).
+- **Multi-Audio (2 Sprachen):** Job-Typ `vod_multi_audio` (Quelle braucht zwei Audio-Streams).
+- **Immersive Audio bis 22.2:** Job-Typ `vod_immersive_audio` — erzeugt je nach Quelle:
+  - **AAC-LC Stereo** (immer)
+  - **AAC-LC 5.1** (bei ≥6 Kanälen)
+  - **AAC-LC 7.1** (bei ≥8 Kanälen)
+  - **Opus 22.2 (24 ch)** (bei ≥24 Kanälen, NHK Super Hi-Vision)
+  - **Opus Multichannel-Fallback** sonst
+  Player-/Geräte-Hinweis: AAC-LC wird breit ≤7.1 unterstützt; **22.2** läuft in Chrome/Firefox über **Opus-in-MP4** (DASH) — Safari/iOS/tvOS unterstützen das i. d. R. **nicht**; dort Fallback auf 7.1/5.1/Stereo.
 - **Multi-Angle (Stufe 1):** je Winkel eigener `vod_angle`-Job; im Asset `angles`-JSON setzen.
 - **HDR:** `./scripts/transcode_hdr_hevc_1080p.sh` (HEVC Main10, HDR10/PQ).
 - **AV1:** `./scripts/transcode_av1_1080p.sh` (SVT-AV1).
