@@ -15,7 +15,7 @@ import {
   Typography,
   createTheme,
 } from "@mui/material";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 
 const theme = createTheme({ palette: { mode: "light" } });
 const apiBase = import.meta.env.VITE_API_URL ?? "";
@@ -91,7 +91,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    startTransition(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   const registerDemoAsset = async () => {

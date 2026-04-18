@@ -80,11 +80,17 @@ app.post("/api/assets", async (req, reply) => {
     return { error: "slug and title required" };
   }
   const slug = String(body.slug).replace(/[^a-zA-Z0-9-_]/g, "");
+  if (!slug) {
+    reply.code(400);
+    return { error: "invalid slug after normalization" };
+  }
+  const manifestFromBody = (v: unknown) =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
   const manifestHls =
-    (body.manifestHls as string | undefined) ??
+    manifestFromBody(body.manifestHls) ??
     `${vodBase}/${encodeURIComponent(slug)}/master.m3u8`;
   const manifestDash =
-    (body.manifestDash as string | undefined) ??
+    manifestFromBody(body.manifestDash) ??
     `${vodBase}/${encodeURIComponent(slug)}/manifest.mpd`;
   const row = await upsertAsset({
     slug,
@@ -145,11 +151,14 @@ app.post("/api/uploads/presign", async (req, reply) => {
     reply.code(400);
     return { error: "bucket, key, contentType required" };
   }
+  const rawTtl = Number(process.env.PRESIGN_TTL_SEC ?? "900");
+  const expiresSec =
+    Number.isFinite(rawTtl) && rawTtl > 0 ? Math.min(rawTtl, 604800) : 900;
   const out = await presignPut({
     bucket: body.bucket,
     key: body.key,
     contentType: body.contentType,
-    expiresSec: Number(process.env.PRESIGN_TTL_SEC ?? "900"),
+    expiresSec,
   });
   return out;
 });

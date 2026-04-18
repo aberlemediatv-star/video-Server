@@ -13,9 +13,10 @@ export function Immersive360({ video, active, mode }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!active || !video || !mountRef.current) return;
+    const mountEl = mountRef.current;
+    if (!active || !video || !mountEl) return;
 
-    const mount = mountRef.current;
+    const mount = mountEl;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
       75,
@@ -35,9 +36,10 @@ export function Immersive360({ video, active, mode }: Props) {
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
 
+    /** 180°: horizontale Halbkugel (π rad um Y), voller vertikaler Bogen — typisch für Equirect-180-Inhalt. */
     const geo =
       mode === "equirect180"
-        ? new THREE.SphereGeometry(500, 60, 40, 0, Math.PI * 2, 0, Math.PI / 2)
+        ? new THREE.SphereGeometry(500, 60, 40, 0, Math.PI, 0, Math.PI)
         : new THREE.SphereGeometry(500, 64, 32);
     geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ map: tex });
@@ -66,9 +68,12 @@ export function Immersive360({ video, active, mode }: Props) {
       renderer.setSize(w, h);
     };
     window.addEventListener("resize", onResize);
+    const ro = new ResizeObserver(() => onResize());
+    ro.observe(mount);
 
     return () => {
       cancelAnimationFrame(raf);
+      ro.disconnect();
       window.removeEventListener("resize", onResize);
       controls.dispose();
       geo.dispose();

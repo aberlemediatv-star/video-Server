@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import {
   type JobRow,
   claimNextJob,
@@ -12,6 +12,20 @@ import {
 const DATA_ROOT = process.env.DATA_ROOT ?? join(process.cwd(), "..", "..", "data");
 const SCRIPT_ROOT = process.env.SCRIPT_ROOT ?? join(process.cwd(), "..", "..", "scripts");
 const vodPublicBase = process.env.VOD_PUBLIC_BASE?.replace(/\/$/, "") ?? "http://localhost:8080/vod";
+
+/** Nur relative Pfade unter DATA_ROOT (kein Escape via .. oder absoluter Pfad). */
+function resolveInputFile(root: string, inputRelative: string): string {
+  const s = String(inputRelative).replace(/\\/g, "/").trim();
+  if (!s || s.startsWith("/") || /^[a-zA-Z]:/.test(s)) {
+    throw new Error("inputRelativePath must be a relative path under DATA_ROOT");
+  }
+  const abs = resolve(root, s);
+  const rel = relative(root, abs);
+  if (rel.startsWith("..") || rel === "..") {
+    throw new Error("inputRelativePath leaves DATA_ROOT");
+  }
+  return abs;
+}
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -37,7 +51,7 @@ async function runVodPackage(
   outputSlug: string,
   title: string,
 ): Promise<void> {
-  const inputAbs = join(DATA_ROOT, inputRelative);
+  const inputAbs = resolveInputFile(DATA_ROOT, inputRelative);
   const workBase = join(DATA_ROOT, "work", String(jobId));
   const rend = join(workBase, "rend");
   const pkg = join(workBase, "pkg");
@@ -67,7 +81,7 @@ async function runVodMultiAudio(
   outputSlug: string,
   title: string,
 ): Promise<void> {
-  const inputAbs = join(DATA_ROOT, inputRelative);
+  const inputAbs = resolveInputFile(DATA_ROOT, inputRelative);
   const workBase = join(DATA_ROOT, "work", String(jobId));
   const rend = join(workBase, "rend");
   const pkg = join(workBase, "pkg");

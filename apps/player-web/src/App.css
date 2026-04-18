@@ -110,7 +110,7 @@ button:hover {
 
 .immerse360 {
   width: 100%;
-  min-height: 50vh;
+  aspect-ratio: 16 / 9;
   max-height: 75vh;
   border-radius: 12px;
   overflow: hidden;
@@ -119,7 +119,7 @@ button:hover {
 .immerse360 canvas {
   display: block;
   width: 100% !important;
-  height: auto !important;
+  height: 100% !important;
 }
 
 .list {

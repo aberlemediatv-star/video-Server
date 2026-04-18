@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import shaka from "shaka-player";
 import { Immersive360 } from "./Immersive360";
 import "./App.css";
@@ -23,13 +30,19 @@ type Asset = {
 };
 
 export default function App() {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoForImmersive, setVideoForImmersive] =
+    useState<HTMLVideoElement | null>(null);
   const playerRef = useRef<shaka.Player | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedSlug, setSelectedSlug] = useState<string>("");
   const [format, setFormat] = useState<"dash" | "hls">("dash");
   const [manualUrl, setManualUrl] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    shaka.Player.isBrowserSupported()
+      ? null
+      : "Browser wird von Shaka Player nicht unterstützt.",
+  );
   const [tracks, setTracks] = useState<shaka.extern.Track[]>([]);
   const [audios, setAudios] = useState<shaka.extern.AudioTrack[]>([]);
   const [immersiveOn, setImmersiveOn] = useState(false);
@@ -60,13 +73,6 @@ export default function App() {
       : (selectedAsset.manifestHls ?? "");
   }, [activeAngle, format, manualUrl, selectedAsset]);
 
-  useEffect(() => {
-    shaka.polyfill.installAll();
-    if (!shaka.Player.isBrowserSupported()) {
-      setError("Browser wird von Shaka Player nicht unterstützt.");
-    }
-  }, []);
-
   const loadAssets = useCallback(async () => {
     const res = await fetch(`${apiBase}/api/assets`);
     if (!res.ok) return;
@@ -74,20 +80,48 @@ export default function App() {
     const list = data.assets ?? [];
     setAssets(list);
     setSelectedSlug((prev) => {
-      if (prev) return prev;
+      const stillThere = Boolean(prev && list.some((a) => a.slug === prev));
+      if (stillThere) return prev;
       if (list.some((a) => a.slug === "demo")) return "demo";
       return list[0]?.slug ?? "";
     });
   }, []);
 
   useEffect(() => {
-    void loadAssets();
+    startTransition(() => {
+      void loadAssets();
+    });
   }, [loadAssets]);
 
+  /** Slug aus API gefallen → Auswahl zurücksetzen (vermeidet leeres Manifest / kaputtes <select>). */
   useEffect(() => {
+    if (!selectedSlug) return;
+    if (assets.some((a) => a.slug === selectedSlug)) return;
+    startTransition(() => {
+      setSelectedSlug("");
+      setAngleId("");
+      setImmersiveOn(false);
+    });
+  }, [assets, selectedSlug]);
+
+  /** Winkel-ID nicht mehr im aktuellen Asset → Haupt-Manifest nutzen. */
+  useEffect(() => {
+    const angles = selectedAsset?.angles ?? [];
+    if (!angleId) return;
+    if (angles.some((a) => a.id === angleId)) return;
+    startTransition(() => setAngleId(""));
+  }, [angleId, selectedAsset?.angles]);
+
+  const selectAssetSlug = useCallback((slug: string) => {
+    setSelectedSlug(slug);
     setAngleId("");
     setImmersiveOn(false);
-  }, [selectedSlug]);
+  }, []);
+
+  const bindVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    setVideoForImmersive(el);
+  }, []);
 
   const destroyPlayer = useCallback(() => {
     playerRef.current?.destroy().catch(() => undefined);
@@ -97,7 +131,7 @@ export default function App() {
   const attachPlayer = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !manifestUrl) return;
-    setError(null);
+    if (shaka.Player.isBrowserSupported()) setError(null);
     destroyPlayer();
     const player = new shaka.Player(video);
     playerRef.current = player;
@@ -140,7 +174,7 @@ export default function App() {
             Asset
             <select
               value={selectedSlug}
-              onChange={(e) => setSelectedSlug(e.target.value)}
+              onChange={(e) => selectAssetSlug(e.target.value)}
             >
               <option value="">— wählen —</option>
               {assets.map((a) => (
@@ -208,12 +242,12 @@ export default function App() {
       <section
         className={`videoWrap${immersiveOn ? " immersiveActive" : ""}`}
       >
-        <video ref={videoRef} controls playsInline className="video" />
+        <video ref={bindVideoRef} controls playsInline className="video" />
         {immersiveOn &&
           (selectedAsset?.projection === "equirect360" ||
             selectedAsset?.projection === "equirect180") && (
             <Immersive360
-              video={videoRef.current}
+              video={videoForImmersive}
               active={immersiveOn}
               mode={
                 selectedAsset.projection === "equirect180"
