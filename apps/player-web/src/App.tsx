@@ -25,9 +25,13 @@ type Asset = {
   manifestHls?: string;
   manifestDash?: string;
   projection?: string;
+  spatial?: boolean;
+  stereo?: string;
   audioLanguages?: unknown;
   angles?: Angle[];
 };
+
+type TextTrack = shaka.extern.TextTrack;
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -45,7 +49,10 @@ export default function App() {
   );
   const [tracks, setTracks] = useState<shaka.extern.Track[]>([]);
   const [audios, setAudios] = useState<shaka.extern.AudioTrack[]>([]);
+  const [texts, setTexts] = useState<TextTrack[]>([]);
+  const [textOn, setTextOn] = useState(false);
   const [immersiveOn, setImmersiveOn] = useState(false);
+  const [stereoMode, setStereoMode] = useState<"off" | "sbs-left" | "sbs-right" | "tb-top" | "tb-bottom">("off");
   const [angleId, setAngleId] = useState<string>("");
 
   const selectedAsset = useMemo(
@@ -147,10 +154,17 @@ export default function App() {
       await player.load(manifestUrl);
       setTracks(player.getVariantTracks());
       setAudios(player.getAudioTracks());
+      const tt = typeof player.getTextTracks === "function"
+        ? player.getTextTracks()
+        : [];
+      setTexts(tt);
+      if (!textOn) {
+        player.selectTextTrack(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [destroyPlayer, manifestUrl]);
+  }, [destroyPlayer, manifestUrl, textOn]);
 
   useEffect(() => {
     return () => {
@@ -235,14 +249,47 @@ export default function App() {
               {immersiveOn ? "360°/180° aus" : "360°/180°-Ansicht"}
             </button>
           )}
+          {(selectedAsset?.stereo === "sbs" ||
+            selectedAsset?.stereo === "tb") && (
+            <label>
+              Stereo
+              <select
+                value={stereoMode}
+                onChange={(e) =>
+                  setStereoMode(e.target.value as typeof stereoMode)
+                }
+              >
+                <option value="off">aus (volles Bild)</option>
+                {selectedAsset.stereo === "sbs" && (
+                  <>
+                    <option value="sbs-left">SBS · linkes Auge</option>
+                    <option value="sbs-right">SBS · rechtes Auge</option>
+                  </>
+                )}
+                {selectedAsset.stereo === "tb" && (
+                  <>
+                    <option value="tb-top">TB · oberes Auge</option>
+                    <option value="tb-bottom">TB · unteres Auge</option>
+                  </>
+                )}
+              </select>
+            </label>
+          )}
         </div>
+        {selectedAsset?.spatial && (
+          <p className="muted">
+            Dieses Asset ist als <strong>spatial</strong> markiert (Apple MV-HEVC). Natives Playback ist derzeit Apple Vision Pro vorbehalten.
+          </p>
+        )}
         {error && <p className="error">{error}</p>}
       </section>
 
       <section
         className={`videoWrap${immersiveOn ? " immersiveActive" : ""}`}
       >
-        <video ref={bindVideoRef} controls playsInline className="video" />
+        <div className={`stereo-${stereoMode}`}>
+          <video ref={bindVideoRef} controls playsInline className="video" />
+        </div>
         {immersiveOn &&
           (selectedAsset?.projection === "equirect360" ||
             selectedAsset?.projection === "equirect180") && (
@@ -293,6 +340,39 @@ export default function App() {
             </li>
           ))}
           {!audios.length && <li className="muted">—</li>}
+        </ul>
+        <h2>Untertitel</h2>
+        <ul className="list">
+          <li>
+            <button
+              type="button"
+              onClick={() => {
+                if (!playerRef.current) return;
+                const next = !textOn;
+                setTextOn(next);
+                if (!next) {
+                  playerRef.current.selectTextTrack(null);
+                }
+              }}
+            >
+              {textOn ? "Untertitel aus" : "Untertitel an"}
+            </button>
+          </li>
+          {texts.map((t, i) => (
+            <li key={`${t.language}-${i}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!playerRef.current) return;
+                  playerRef.current.selectTextTrack(t);
+                  if (!textOn) setTextOn(true);
+                }}
+              >
+                {t.label || t.language || "Track"}
+              </button>
+            </li>
+          ))}
+          {!texts.length && <li className="muted">—</li>}
         </ul>
       </section>
     </div>

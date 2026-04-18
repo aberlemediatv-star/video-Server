@@ -34,10 +34,25 @@ type Asset = {
   manifestHls?: string;
   manifestDash?: string;
   projection?: string;
+  spatial?: boolean;
+  stereo?: string;
   audioLanguages?: unknown;
   angles?: Angle[];
   createdAt?: string;
 };
+
+const PROJECTIONS = [
+  { v: "none", l: "none (flach)" },
+  { v: "equirect180", l: "equirect180 (Halbkugel)" },
+  { v: "equirect360", l: "equirect360 (Vollkugel)" },
+  { v: "apmp_180", l: "apmp_180 (Apple Vision Pro)" },
+  { v: "apmp_360", l: "apmp_360 (Apple Vision Pro)" },
+];
+const STEREO = [
+  { v: "mono", l: "mono" },
+  { v: "sbs", l: "Side-by-Side" },
+  { v: "tb", l: "Top-Bottom" },
+];
 
 type Job = {
   id: string;
@@ -61,6 +76,13 @@ export default function App() {
   const [jobPayload, setJobPayload] = useState(
     '{\n  "inputRelativePath": "incoming/demo.mp4",\n  "outputSlug": "demo",\n  "title": "Demo"\n}',
   );
+  const [assetSlug, setAssetSlug] = useState("");
+  const [assetTitle, setAssetTitle] = useState("");
+  const [assetHls, setAssetHls] = useState("");
+  const [assetDash, setAssetDash] = useState("");
+  const [assetProjection, setAssetProjection] = useState("none");
+  const [assetSpatial, setAssetSpatial] = useState(false);
+  const [assetStereo, setAssetStereo] = useState("mono");
 
   const authHeaders = useMemo(() => {
     const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -168,6 +190,32 @@ export default function App() {
     await refresh();
   };
 
+  const saveAsset = async () => {
+    setError(null);
+    if (!assetSlug.trim() || !assetTitle.trim()) {
+      setError("Slug und Titel nötig");
+      return;
+    }
+    const res = await fetch(`${apiBase}/api/assets`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        slug: assetSlug.trim(),
+        title: assetTitle.trim(),
+        manifestHls: assetHls.trim() || undefined,
+        manifestDash: assetDash.trim() || undefined,
+        projection: assetProjection,
+        spatial: assetSpatial,
+        stereo: assetStereo,
+      }),
+    });
+    if (!res.ok) {
+      setError(await res.text());
+      return;
+    }
+    await refresh();
+  };
+
   const doPresign = async () => {
     setError(null);
     setPresignOut("");
@@ -243,6 +291,83 @@ export default function App() {
             Demo-Job (DB)
           </Button>
         </Stack>
+
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            Asset anlegen / aktualisieren
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", mb: 1 }}>
+            <TextField
+              size="small"
+              label="Slug"
+              value={assetSlug}
+              onChange={(e) => setAssetSlug(e.target.value)}
+            />
+            <TextField
+              size="small"
+              label="Titel"
+              value={assetTitle}
+              onChange={(e) => setAssetTitle(e.target.value)}
+              sx={{ minWidth: 260 }}
+            />
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", mb: 1 }}>
+            <TextField
+              size="small"
+              label="HLS URL (optional)"
+              value={assetHls}
+              onChange={(e) => setAssetHls(e.target.value)}
+              sx={{ minWidth: 320 }}
+            />
+            <TextField
+              size="small"
+              label="DASH URL (optional)"
+              value={assetDash}
+              onChange={(e) => setAssetDash(e.target.value)}
+              sx={{ minWidth: 320 }}
+            />
+          </Stack>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", mb: 1, alignItems: "center" }}>
+            <Typography variant="body2">Projektion</Typography>
+            <select
+              value={assetProjection}
+              onChange={(e) => setAssetProjection(e.target.value)}
+              style={{ padding: "8px 12px" }}
+            >
+              {PROJECTIONS.map((p) => (
+                <option key={p.v} value={p.v}>
+                  {p.l}
+                </option>
+              ))}
+            </select>
+            <Typography variant="body2">Stereo</Typography>
+            <select
+              value={assetStereo}
+              onChange={(e) => setAssetStereo(e.target.value)}
+              style={{ padding: "8px 12px" }}
+            >
+              {STEREO.map((p) => (
+                <option key={p.v} value={p.v}>
+                  {p.l}
+                </option>
+              ))}
+            </select>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={assetSpatial}
+                onChange={(e) => setAssetSpatial(e.target.checked)}
+              />
+              Spatial (Apple MV-HEVC, Platzhalter)
+            </label>
+            <Button variant="contained" onClick={() => void saveAsset()}>
+              Speichern
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            Für echtes 360°/180°-Bild zuerst VOD encoden und Manifest-URL setzen. Spatial/Apple Vision Pro benötigt MV-HEVC-Encoder (nicht im Repo).
+          </Typography>
+        </Paper>
 
         <Paper sx={{ p: 2, mb: 2 }}>
           <Typography variant="h6" gutterBottom>
@@ -322,6 +447,8 @@ export default function App() {
                 <TableCell>Slug</TableCell>
                 <TableCell>Titel</TableCell>
                 <TableCell>Projektion</TableCell>
+                <TableCell>Stereo</TableCell>
+                <TableCell>Spatial</TableCell>
                 <TableCell>HLS</TableCell>
                 <TableCell>DASH</TableCell>
               </TableRow>
@@ -332,6 +459,8 @@ export default function App() {
                   <TableCell>{row.slug}</TableCell>
                   <TableCell>{row.title}</TableCell>
                   <TableCell>{row.projection ?? "none"}</TableCell>
+                  <TableCell>{row.stereo ?? "mono"}</TableCell>
+                  <TableCell>{row.spatial ? "ja" : ""}</TableCell>
                   <TableCell sx={{ wordBreak: "break-all", maxWidth: 200 }}>
                     {row.manifestHls}
                   </TableCell>
@@ -342,7 +471,7 @@ export default function App() {
               ))}
               {!assets.length && (
                 <TableRow>
-                  <TableCell colSpan={5}>Keine Einträge</TableCell>
+                  <TableCell colSpan={7}>Keine Einträge</TableCell>
                 </TableRow>
               )}
             </TableBody>

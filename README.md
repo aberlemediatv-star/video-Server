@@ -1,107 +1,83 @@
-# Video-Server (ohne DRM)
+# Video-Server
 
-Docker-Stack: **Nginx** (VOD + Live-HLS-Proxy + `/api`), **Control-API** (Fastify + **Postgres**), **Worker** (FFmpeg + Shaka per Docker-Socket), **MediaMTX**, **MinIO**, **Redis**, **Postgres**.
+VOD/Live-Streaming-Stack mit **HLS + MPEG-DASH (CMAF)**, Multi-Audio, Multi-Angle, 180°/360°-Playback und Platzhalter-Feldern für Apple Vision Pro (Spatial). **Open-Source-Pipeline**: FFmpeg, Shaka Packager, Nginx, MediaMTX, MinIO, Postgres, Redis. **Ohne DRM** (bewusste Entscheidung).
+
+Repo: **https://github.com/aberlemediatv-star/video-Server**
+
+## Bestandteile
+
+- `services/control-api` — Fastify-API + Worker (FFmpeg + Shaka via Docker-Socket)
+- `apps/admin-web` — React-Admin (MUI): Assets, Presign, Jobs, Projektion/Stereo/Spatial
+- `apps/player-web` — React-Player (Shaka + Three.js): HLS/DASH, Multi-Audio, Multi-Angle, 360°/180°, Stereo SBS/TB, Untertitel
+- `scripts/` — FFmpeg-Ladder (SD/HD), Shaka-Packaging (CMAF), **HDR (HEVC Main10)**, **AV1 (SVT-AV1)**, **Multi-Audio**, **WebVTT-Untertitel**
+- `nginx/` — VOD-Origin, Live-HLS-Proxy, Cache-Feinschliff
+- `mediamtx/` — Live-Ingest (SRT/RTMP/RTSP/WebRTC)
+- `.github/workflows/ci.yml` — Build-Check für API + beide Web-Apps
 
 ## Schnellstart
 
 ```bash
-cd "/Users/christianaberle/video server"
+cp .env.example .env   # optional: ADMIN_API_KEY setzen!
 docker compose up -d --build
 ```
 
-- VOD: `http://localhost:8080/vod/<slug>/`
-- Live-HLS (MediaMTX-Pfad `live`): `http://localhost:8080/live/hls/index.m3u8` (Publisher nach `rtmp://localhost:1935/live` oder RTSP)
-- API: `http://localhost:3000` oder `http://localhost:8080/api/`
-- MinIO-Konsole: `http://localhost:9001` — Bucket z. B. **`incoming`** anlegen, damit Presign-Uploads funktionieren.
+URLs:
 
-### Admin-API-Key (empfohlen)
+- VOD-Origin: `http://localhost:8080/vod/<slug>/`
+- Live-HLS-Proxy: `http://localhost:8080/live/hls/index.m3u8`
+- API: `http://localhost:3000` oder über Nginx: `http://localhost:8080/api/`
+- Admin: `apps/admin-web` lokal (`npm run dev`) auf `http://localhost:5174`
+- Player: `apps/player-web` lokal (`npm run dev`) auf `http://localhost:5173`
+- MinIO-Konsole: `http://localhost:9001` (Default `minio`/`minio12345`)
 
-Setze in `.env` oder Shell:
+MinIO-Buckets **`incoming`** und **`assets`** werden beim Start **automatisch** angelegt (`minio-init`-Service).
 
-```bash
-export ADMIN_API_KEY=ein-geheimer-wert
-docker compose up -d --build
-```
+## Admin-Auth
 
-Ohne Key sind **POST**-Routen (Assets, Jobs, Presign) offen (nur für lokale Entwicklung gedacht).
+`ADMIN_API_KEY` setzen (Umgebungsvariable oder `.env`). Alle **POST**-Routen verlangen dann Header **`X-Admin-Key`**. Ohne Key sind POSTs **offen** — nur für lokale Entwicklung.
 
-Admin-Web (`apps/admin-web`): Feld **ADMIN_API_KEY** ausfüllen und speichern — alle Mutationen senden `X-Admin-Key`.
+## VOD-Workflow
 
-## Worker & Datenbank
+1. Eingangsdatei nach `data/incoming/meinfilm.mp4` legen (oder per Presign hochladen).
+2. Im Admin „Worker-Job“ mit Typ **`vod_phase_a`**:
+   ```json
+   { "inputRelativePath": "incoming/meinfilm.mp4", "outputSlug": "meinfilm", "title": "Mein Film" }
+   ```
+3. Worker führt aus: **FFmpeg ABR-Ladder** → **Shaka Packager (HLS + DASH)** → kopiert nach `data/vod/<slug>/` → aktualisiert Asset.
+4. Im Player Asset wählen und **Laden**.
 
-Jobs (`vod_phase_a`, `vod_angle`, `vod_multi_audio`) werden in **Postgres** gequeued; der **Worker**-Container:
+## Weitere Skripte
 
-- liest `inputRelativePath` relativ zu **`/data`** (Host: `./data`),
-- führt Skripte unter **`/scripts`** aus,
-- schreibt fertige Pakete nach **`/data/vod/<outputSlug>/`**,
-- aktualisiert Manifest-URLs im Asset.
+- **Multi-Audio:** Job-Typ `vod_multi_audio` (Quelle braucht zwei Audio-Streams).
+- **Multi-Angle (Stufe 1):** je Winkel eigener `vod_angle`-Job; im Asset `angles`-JSON setzen.
+- **HDR:** `./scripts/transcode_hdr_hevc_1080p.sh` (HEVC Main10, HDR10/PQ).
+- **AV1:** `./scripts/transcode_av1_1080p.sh` (SVT-AV1).
+- **Untertitel:** `./scripts/package_cmaf_with_subs.sh` (Sidecar-WebVTT).
 
-**Beispiel:** Datei auf den Host legen: `data/incoming/meinfilm.mp4`, dann per Admin „Worker-Job“ oder:
+## 360°, 180°, 3D (SBS/TB)
 
-```bash
-curl -sS -X POST "http://localhost:3000/api/jobs" \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Key: $ADMIN_API_KEY" \
-  -d '{"type":"vod_phase_a","payload":{"inputRelativePath":"incoming/meinfilm.mp4","outputSlug":"meinfilm","title":"Mein Film"}}'
-```
+Asset-Felder in DB/Admin:
 
-## Phase A lokal (Skript)
+- `projection`: `none` | `equirect180` | `equirect360` | `apmp_180` | `apmp_360`
+- `stereo`: `mono` | `sbs` | `tb`
+- `spatial`: `boolean` (Platzhalter für Apple MV-HEVC)
 
-```bash
-make scripts-executable
-# API läuft; bei ADMIN_API_KEY:
-export ADMIN_API_KEY=…
-make phase-a INPUT=/pfad/zum/video.mp4
-```
+Player zeigt den passenden Modus:
 
-## Multi-Audio
+- **360/180** → Three.js-Rendering auf Halb-/Vollkugel
+- **SBS/TB** → CSS-Crop auf eine Augenhälfte (Fallback-Rendering)
+- **spatial** → Hinweis, dass natives Playback Apple Vision Pro vorbehalten ist
 
-Quelle mit **mindestens zwei Audio-Streams**. Job-Typ **`vod_multi_audio`** (gleiches Payload wie `vod_phase_a`). Skripte: `transcode_abr_multiaudio.sh`, `package_cmaf_multiaudio.sh`.
+## Nicht enthalten / bewusst weggelassen
 
-## Multi-Angle (Stufe 1)
+- **DRM** (Widevine/FairPlay/ClearKey/PlayReady).
+- **Apple Vision Pro / MV-HEVC / APMP** — Felder sind vorbereitet, Encoding nicht. Benötigt Apple-Tooling oder experimentelle x265-Patches.
+- **Produktive Auth** (OAuth/OIDC), **SSAI**, **Smart-TV-Apps**, **Analytics/Observability** — siehe Plan Phase H+.
 
-Pro Winkel eigener **`outputSlug`** (eigenes Manifest), z. B. zweiter Job `vod_angle` mit `outputSlug: "live_side"`. Im Asset **`angles`** setzen (JSON), damit der Player die Manifeste wählen kann:
+## CI
 
-```json
-"angles": [
-  {
-    "id": "side",
-    "label": "Seitenkamera",
-    "manifestHls": "http://localhost:8080/vod/side/master.m3u8",
-    "manifestDash": "http://localhost:8080/vod/side/manifest.mpd"
-  }
-]
-```
+GitHub Actions (`.github/workflows/ci.yml`) prüft `services/control-api`, `apps/admin-web`, `apps/player-web` via `npm ci && npm run build` und läuft `shellcheck` über `scripts/*.sh`.
 
-## HDR (Beispiel)
+## Lizenz
 
-Ein HDR-HEVC-1080p-File erzeugen (nicht automatisch in der Standard-Ladder):
-
-```bash
-./scripts/transcode_hdr_hevc_1080p.sh eingang.mp4 data/work/hdr1080.mp4
-```
-
-## 360° / 180° im Player
-
-Asset-Feld **`projection`**: `none` | `equirect360` | `equirect180`. Admin-Button „Demo-Asset 360°“ legt nur Metadaten an — für echtes Bild zuerst VOD encoden und Manifeste setzen.
-
-## Web-Apps (Dev)
-
-```bash
-cd services/control-api && npm run dev
-cd apps/player-web && npm run dev
-cd apps/admin-web && npm run dev
-```
-
-## MinIO Presign
-
-Admin → **Presigned PUT**: liefert URL; Upload z. B. mit `curl -X PUT --upload-file … "<url>"`.
-
-## Nginx-Cache
-
-Manifeste (`m3u8`/`mpd`) kurz cachebar, Segmente (`m4s`/`mp4`) länger — siehe `map` in `nginx/nginx.conf`.
-
-## Nicht enthalten (bewusst)
-
-- **DRM** (Widevine/FairPlay/ClearKey) — separat nachrüstbar.
-- Produktions-harte **Auth** (OAuth), **Observability**, **SSAI** — siehe Plan Phase H+.
+MIT — siehe `LICENSE`.

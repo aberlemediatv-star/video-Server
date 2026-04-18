@@ -27,14 +27,29 @@ function resolveInputFile(root: string, inputRelative: string): string {
   return abs;
 }
 
+const jobTimeoutSec = Math.max(
+  60,
+  Number(process.env.JOB_TIMEOUT_SEC ?? "7200"),
+);
+
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       stdio: "inherit",
       env: { ...process.env, PATH: process.env.PATH },
     });
-    child.on("error", reject);
+    const to = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(
+        new Error(`${cmd} timed out after ${jobTimeoutSec}s`),
+      );
+    }, jobTimeoutSec * 1000);
+    child.on("error", (e) => {
+      clearTimeout(to);
+      reject(e);
+    });
     child.on("exit", (code) => {
+      clearTimeout(to);
       if (code === 0) resolve();
       else reject(new Error(`${cmd} exited with ${code}`));
     });

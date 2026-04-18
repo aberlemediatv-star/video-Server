@@ -13,9 +13,11 @@ export const pool = new Pool({ connectionString, max: 10 });
 
 export async function migrate(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sqlPath = join(here, "..", "migrations", "001_init.sql");
-  const sql = readFileSync(sqlPath, "utf8");
-  await pool.query(sql);
+  const dir = join(here, "..", "migrations");
+  for (const name of ["001_init.sql", "002_projection_spatial.sql"]) {
+    const sql = readFileSync(join(dir, name), "utf8");
+    await pool.query(sql);
+  }
 }
 
 export type AssetRow = {
@@ -24,6 +26,8 @@ export type AssetRow = {
   manifest_hls: string | null;
   manifest_dash: string | null;
   projection: string;
+  spatial: boolean;
+  stereo: string;
   audio_languages: unknown;
   angles: unknown;
   created_at: Date;
@@ -43,7 +47,7 @@ export type JobRow = {
 
 export async function listAssets(): Promise<AssetRow[]> {
   const r = await pool.query<AssetRow>(
-    `SELECT slug, title, manifest_hls, manifest_dash, projection, audio_languages, angles, created_at, updated_at
+    `SELECT slug, title, manifest_hls, manifest_dash, projection, spatial, stereo, audio_languages, angles, created_at, updated_at
      FROM assets ORDER BY updated_at DESC LIMIT 500`,
   );
   return r.rows;
@@ -55,27 +59,33 @@ export async function upsertAsset(params: {
   manifestHls?: string;
   manifestDash?: string;
   projection?: string;
+  spatial?: boolean;
+  stereo?: string;
   audioLanguages?: unknown;
   angles?: unknown;
 }): Promise<AssetRow> {
   const r = await pool.query<AssetRow>(
-    `INSERT INTO assets (slug, title, manifest_hls, manifest_dash, projection, audio_languages, angles, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb, now())
+    `INSERT INTO assets (slug, title, manifest_hls, manifest_dash, projection, spatial, stereo, audio_languages, angles, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb, now())
      ON CONFLICT (slug) DO UPDATE SET
        title = EXCLUDED.title,
        manifest_hls = COALESCE(EXCLUDED.manifest_hls, assets.manifest_hls),
        manifest_dash = COALESCE(EXCLUDED.manifest_dash, assets.manifest_dash),
        projection = EXCLUDED.projection,
+       spatial = EXCLUDED.spatial,
+       stereo = EXCLUDED.stereo,
        audio_languages = EXCLUDED.audio_languages,
        angles = EXCLUDED.angles,
        updated_at = now()
-     RETURNING slug, title, manifest_hls, manifest_dash, projection, audio_languages, angles, created_at, updated_at`,
+     RETURNING slug, title, manifest_hls, manifest_dash, projection, spatial, stereo, audio_languages, angles, created_at, updated_at`,
     [
       params.slug,
       params.title,
       params.manifestHls ?? null,
       params.manifestDash ?? null,
       params.projection ?? "none",
+      params.spatial ?? false,
+      params.stereo ?? "mono",
       JSON.stringify(params.audioLanguages ?? []),
       JSON.stringify(params.angles ?? []),
     ],
@@ -90,8 +100,8 @@ export async function setAssetManifests(params: {
   manifestDash: string;
 }): Promise<void> {
   await pool.query(
-    `INSERT INTO assets (slug, title, manifest_hls, manifest_dash, projection, audio_languages, angles, updated_at)
-     VALUES ($1,$2,$3,$4,'none','[]','[]', now())
+    `INSERT INTO assets (slug, title, manifest_hls, manifest_dash, projection, spatial, stereo, audio_languages, angles, updated_at)
+     VALUES ($1,$2,$3,$4,'none', false, 'mono', '[]', '[]', now())
      ON CONFLICT (slug) DO UPDATE SET
        title = EXCLUDED.title,
        manifest_hls = EXCLUDED.manifest_hls,

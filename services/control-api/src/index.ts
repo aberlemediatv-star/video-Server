@@ -20,6 +20,8 @@ function rowToAsset(row: Awaited<ReturnType<typeof listAssets>>[0]) {
     manifestHls: row.manifest_hls ?? undefined,
     manifestDash: row.manifest_dash ?? undefined,
     projection: row.projection,
+    spatial: row.spatial,
+    stereo: row.stereo,
     audioLanguages: row.audio_languages,
     angles: row.angles,
     createdAt: row.created_at.toISOString(),
@@ -98,6 +100,8 @@ app.post("/api/assets", async (req, reply) => {
     manifestHls,
     manifestDash,
     projection: (body.projection as string) ?? "none",
+    spatial: Boolean(body.spatial),
+    stereo: ((body.stereo as string) ?? "mono").toLowerCase(),
     audioLanguages: body.audioLanguages,
     angles: body.angles,
   });
